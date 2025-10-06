@@ -1,0 +1,12 @@
+data/
+*.csv
+*.json
+*.xml
+*.pyc
+__pycache__/
+.env
+.vscode/
+.DS_Store
+.idea/
+*.log
+*.sqlite3
