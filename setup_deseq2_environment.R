@@ -9,16 +9,25 @@
 
 cat("=== DESeq2 Analysis Environment Setup ===\n\n")
 
+# Set CRAN mirror
+options(repos = c(CRAN = "https://cran.rstudio.com/"))
+cat("CRAN mirror set to:", getOption("repos")["CRAN"], "\n\n")
+
 # Function to install packages if not already installed
 install_if_missing <- function(packages, from = "CRAN") {
   for (pkg in packages) {
     if (!require(pkg, character.only = TRUE, quietly = TRUE)) {
       cat("Installing", pkg, "from", from, "...\n")
-      if (from == "CRAN") {
-        install.packages(pkg, dependencies = TRUE)
-      } else if (from == "Bioconductor") {
-        BiocManager::install(pkg, dependencies = TRUE)
-      }
+      tryCatch({
+        if (from == "CRAN") {
+          install.packages(pkg, dependencies = TRUE, repos = "https://cran.rstudio.com/")
+        } else if (from == "Bioconductor") {
+          BiocManager::install(pkg, dependencies = TRUE)
+        }
+        cat("✓", pkg, "installed successfully\n")
+      }, error = function(e) {
+        cat("✗ Failed to install", pkg, ":", e$message, "\n")
+      })
     } else {
       cat("✓", pkg, "already installed\n")
     }
@@ -28,7 +37,15 @@ install_if_missing <- function(packages, from = "CRAN") {
 # Install BiocManager if not available
 if (!require("BiocManager", quietly = TRUE)) {
   cat("Installing BiocManager...\n")
-  install.packages("BiocManager")
+  tryCatch({
+    install.packages("BiocManager", repos = "https://cran.rstudio.com/")
+    cat("✓ BiocManager installed successfully\n")
+  }, error = function(e) {
+    cat("✗ Failed to install BiocManager:", e$message, "\n")
+    cat("Please install BiocManager manually: install.packages('BiocManager')\n")
+  })
+} else {
+  cat("✓ BiocManager already available\n")
 }
 
 # CRAN packages
