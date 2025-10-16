@@ -7,6 +7,10 @@
 #' Input: salmon.merged.gene_counts.tsv from nf-core/rnaseq
 #' Output: Multiple comparison results, plots, and summary tables
 #' 
+#' CUSTOMIZATION:
+#' To modify sample groups, edit the sample lists below (lines ~35-60) or use:
+#' update_sample_groups(new_control = c("sample1", "sample2"), ...)
+#' 
 #' Author: Generated for CRC differential expression analysis
 #' Date: 2025-10-06
 
@@ -32,10 +36,72 @@ dir.create("results", showWarnings = FALSE)
 dir.create("results/plots", showWarnings = FALSE)
 dir.create("results/tables", showWarnings = FALSE)
 
+#' Define sample groups for analysis
+#' Modify these lists according to your experimental design
+CONTROL_SAMPLES <- c(
+  "CRC-10-NT",
+  "CRC-13-NT", 
+  "CRC-14-NT",
+  "CRC-16-NT"
+)
+
+TREATMENT_SAMPLES <- c(
+  "CRC-10-CT",
+  "CRC-13-CT",
+  "CRC-14-CT", 
+  "CRC-16-CT"
+)
+
+# Additional sample groups (organoids)
+ORGANOID_PASSAGE_SAMPLES <- c(
+  "CRC-10-ENA-P8",
+  "CRC-13-ENAS-P3",
+  "CRC-14-ENA-P4",
+  "CRC-16-ENA-P7"
+)
+
+ORGANOID_SPHERE_SAMPLES <- c(
+  "CRC-10-ENAS-P8",
+  "CRC-13-ENAS-P8",
+  "CRC-14-ENAS-P3",
+  "CRC-10-ENAS-P8H"
+)
+
+#' Helper function to customize sample groups
+#' Use this function to easily modify sample assignments before running analysis
+#' @param new_control Vector of control sample names
+#' @param new_treatment Vector of treatment sample names  
+#' @param new_organoid_passage Vector of organoid passage sample names
+#' @param new_organoid_sphere Vector of organoid sphere sample names
+update_sample_groups <- function(new_control = NULL, new_treatment = NULL, 
+                                new_organoid_passage = NULL, new_organoid_sphere = NULL) {
+  if (!is.null(new_control)) CONTROL_SAMPLES <<- new_control
+  if (!is.null(new_treatment)) TREATMENT_SAMPLES <<- new_treatment
+  if (!is.null(new_organoid_passage)) ORGANOID_PASSAGE_SAMPLES <<- new_organoid_passage
+  if (!is.null(new_organoid_sphere)) ORGANOID_SPHERE_SAMPLES <<- new_organoid_sphere
+  
+  cat("Updated sample groups:\n")
+  cat("Control:", paste(CONTROL_SAMPLES, collapse = ", "), "\n")
+  cat("Treatment:", paste(TREATMENT_SAMPLES, collapse = ", "), "\n")
+  cat("Organoid passage:", paste(ORGANOID_PASSAGE_SAMPLES, collapse = ", "), "\n")
+  cat("Organoid sphere:", paste(ORGANOID_SPHERE_SAMPLES, collapse = ", "), "\n")
+}
+
+#' Print current sample group assignments
+print_sample_groups <- function() {
+  cat("Current sample group assignments:\n")
+  cat("Control samples:", paste(CONTROL_SAMPLES, collapse = ", "), "\n")
+  cat("Treatment samples:", paste(TREATMENT_SAMPLES, collapse = ", "), "\n")
+  cat("Organoid passage samples:", paste(ORGANOID_PASSAGE_SAMPLES, collapse = ", "), "\n")
+  cat("Organoid sphere samples:", paste(ORGANOID_SPHERE_SAMPLES, collapse = ", "), "\n\n")
+}
+
 #' Load and prepare count data
 #' @param counts_file Path to the gene counts file
+#' @param control_samples Vector of control sample names
+#' @param treatment_samples Vector of treatment sample names
 #' @return List containing counts matrix and sample metadata
-load_count_data <- function(counts_file) {
+load_count_data <- function(counts_file, control_samples = CONTROL_SAMPLES, treatment_samples = TREATMENT_SAMPLES) {
   cat("Loading count data from:", counts_file, "\n")
   
   # Read count data
@@ -51,35 +117,69 @@ load_count_data <- function(counts_file) {
   # Round counts to integers (DESeq2 requirement)
   counts_matrix <- round(as.matrix(counts_matrix))
   
-  # Create sample metadata based on sample names
+  # Get all sample names from the count matrix
+  all_sample_names <- colnames(counts_matrix)
+  
+  # Combine all predefined sample groups
+  all_predefined_samples <- c(
+    control_samples,
+    treatment_samples,
+    ORGANOID_PASSAGE_SAMPLES,
+    ORGANOID_SPHERE_SAMPLES
+  )
+  
+  # Check which predefined samples are actually present in the data
+  available_samples <- intersect(all_predefined_samples, all_sample_names)
+  missing_samples <- setdiff(all_predefined_samples, all_sample_names)
+  
+  if (length(missing_samples) > 0) {
+    cat("Warning: The following predefined samples are not found in the data:\n")
+    cat(paste(missing_samples, collapse = ", "), "\n")
+  }
+  
+  # Use only available samples for analysis
+  counts_matrix <- counts_matrix[, available_samples]
   sample_names <- colnames(counts_matrix)
   
-  # Parse sample information from names (CRC-##-CONDITION)
+  # Create sample metadata based on predefined groups
   sample_metadata <- data.frame(
     sample_id = sample_names,
-    patient_id = str_extract(sample_names, "CRC-\\d+"),
-    condition = str_extract(sample_names, "(CT|NT|ENA-P\\d+|ENAS-P\\d+|ENAS-P\\d+H?)$"),
     stringsAsFactors = FALSE
   )
   
-  # Simplify conditions for main comparisons
+  # Assign conditions based on predefined sample lists
   sample_metadata$condition_simple <- case_when(
-    sample_metadata$condition == "CT" ~ "tumor",
-    sample_metadata$condition == "NT" ~ "normal",
-    str_detect(sample_metadata$condition, "ENA-P") ~ "organoid_passage",
-    str_detect(sample_metadata$condition, "ENAS-P") ~ "organoid_sphere",
+    sample_metadata$sample_id %in% control_samples ~ "normal",
+    sample_metadata$sample_id %in% treatment_samples ~ "tumor", 
+    sample_metadata$sample_id %in% ORGANOID_PASSAGE_SAMPLES ~ "organoid_passage",
+    sample_metadata$sample_id %in% ORGANOID_SPHERE_SAMPLES ~ "organoid_sphere",
     TRUE ~ "other"
   )
   
-  # Add batch information (patient as batch)
+  # Extract patient ID from sample names for batch effect correction
+  sample_metadata$patient_id <- str_extract(sample_names, "CRC-\\d+")
   sample_metadata$batch <- sample_metadata$patient_id
+  
+  # Extract original condition from sample names for reference
+  sample_metadata$original_condition <- str_extract(sample_names, "(CT|NT|ENA-P\\d+|ENAS-P\\d+|ENAS-P\\d+H?)$")
   
   rownames(sample_metadata) <- sample_names
   
   cat("Data summary:\n")
   cat("- Genes:", nrow(counts_matrix), "\n")
-  cat("- Samples:", ncol(counts_matrix), "\n")
-  cat("- Conditions:", paste(unique(sample_metadata$condition_simple), collapse = ", "), "\n")
+  cat("- Total samples available:", length(all_sample_names), "\n")
+  cat("- Samples used for analysis:", ncol(counts_matrix), "\n")
+  cat("- Control samples:", sum(sample_metadata$condition_simple == "normal"), "\n")
+  cat("- Treatment samples:", sum(sample_metadata$condition_simple == "tumor"), "\n")
+  cat("- Organoid passage samples:", sum(sample_metadata$condition_simple == "organoid_passage"), "\n")
+  cat("- Organoid sphere samples:", sum(sample_metadata$condition_simple == "organoid_sphere"), "\n")
+  
+  # Print sample assignments
+  cat("\nSample assignments:\n")
+  for (condition in unique(sample_metadata$condition_simple)) {
+    samples_in_condition <- sample_metadata$sample_id[sample_metadata$condition_simple == condition]
+    cat(paste0(condition, ": ", paste(samples_in_condition, collapse = ", ")), "\n")
+  }
   
   return(list(
     counts = counts_matrix,
@@ -277,6 +377,9 @@ perform_pca <- function(dds) {
 #' Main analysis function
 main_analysis <- function() {
   cat("=== DESeq2 Differential Expression Analysis ===\n\n")
+  
+  # Print current sample group assignments
+  print_sample_groups()
   
   # Load data
   data <- load_count_data("data/star_salmon/salmon.merged.gene_counts.tsv")
